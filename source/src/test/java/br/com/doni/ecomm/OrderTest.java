@@ -1,20 +1,17 @@
 package br.com.doni.ecomm;
 
-import br.com.doni.ecomm.models.DiscountCoupon;
-import br.com.doni.ecomm.models.Order;
-import br.com.doni.ecomm.models.OrderedProduct;
-import br.com.doni.ecomm.models.Product;
-import br.com.doni.ecomm.services.OrderService;
+import br.com.doni.ecomm.models.*;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.runner.RunWith;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.junit4.SpringRunner;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Calendar;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(classes = EcommerceApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -23,45 +20,61 @@ import java.util.List;
 class OrderTest {
     private final String CPF_INVALID = "123.123.123-222";
     private final String CPF_VALID = "764.286.220-25";
-    private final Double PRODUCT_PRICE = 10.0;
+    private Order order;
 
-    @Autowired
-    private OrderService orderService;
+    @BeforeEach
+    public void setup() {
+        order = new Order(CPF_VALID);
+        order.addItem(new Product(1L, "Processador", 1200.00, new Dimension(10.0, 10.0, 1.00), 3.0), 1);
+        order.addItem(new Product(2L, "Pente de Memoria RAM 8GB", 350.00, new Dimension(1.0, 1.5, 0.3), 2.0), 2);
+        order.addItem(new Product(3L, "HD SATA 500GB", 200.00, new Dimension(2.0, 2.0, 0.5), 1.0), 1);
+    }
 
     @Test
     void placeOrderWithInvalidCpf() {
-        List orderedProducts = createOrderedProducts(1);
         Assertions.assertThrows(IllegalArgumentException.class,
-                () -> orderService.makerOrder(orderedProducts, CPF_INVALID));
+                () -> new Order(CPF_INVALID));
+    }
+
+    @Test
+    void placeOrderHasCPF() {
+        assertThat(order.getCpf()).isNotNull();
     }
 
     @Test
     void placeOrderWithTreeItems() {
-        List orderedProducts = createOrderedProducts(3);
-        Order order = orderService.makerOrder(orderedProducts, CPF_VALID);
-        Assertions.assertTrue(order.getOrderedProductList().size() == 3);
-        Assertions.assertEquals(order.calculatePrice(), PRODUCT_PRICE * order.getOrderedProductList().size(), 0);
+        assertThat(order.getOrderedProductList().size() == 3).isTrue();
+        assertThat(order.calculatePrice()).isEqualTo(2100.00);
     }
 
     @Test
     void placeOrderWithDiscount() {
-        List orderedProducts = createOrderedProducts(1);
-        DiscountCoupon discountCoupon = new DiscountCoupon(1L, "50% off", 50);
-        Order order = orderService.makerOrder(orderedProducts, CPF_VALID);
-        order.addDiscountCoupon(discountCoupon);
-        Assertions.assertTrue(order.getOrderedProductList().size() == 1);
-        Assertions.assertEquals(order.calculatePrice(), (PRODUCT_PRICE * order.getOrderedProductList().size()) * discountCoupon.getDiscountPercentage() / 100, 0);
+        DiscountCoupon discountCoupon = new DiscountCoupon(1L, "50% off", 50.00, Calendar.getInstance());
+        order.applyCoupon(discountCoupon);
+        assertThat(order.getDiscountCoupon()).isNotNull();
+        assertThat(order.calculatePrice()).isEqualTo(1050.00);
     }
 
-    public List<OrderedProduct> createOrderedProducts(Integer numberItemsInOrder) {
-        List orderedProducts = new ArrayList();
-        for (long countItems = 0; countItems < numberItemsInOrder; countItems++) {
-            orderedProducts.add(new OrderedProduct(buildProduct(countItems, PRODUCT_PRICE), 1));
-        }
-        return orderedProducts;
+    @Test
+    void applyExpiredDiscountCoupon() {
+        Calendar expirationDate = Calendar.getInstance();
+        expirationDate.set(Calendar.MONTH, -3);
+        var coupon = new DiscountCoupon(1l, "25% OFF", 25.00, expirationDate);
+        assertThat(order.applyCoupon(coupon)).isFalse();
+        assertThat(order.calculatePrice()).isEqualTo(2100.00);
     }
 
-    Product buildProduct(Long id, Double price) {
-        return new Product(id, "Product-" + id, 10.0, price);
+    @Test
+    void calculateShippingFee() {
+        order.calculateShippingFee();
+        assertThat(order.getShippingFee()).isEqualTo(80.0);
+    }
+
+    @Test
+    void calculateMinimumShippingFee() {
+        var order = new Order(CPF_VALID);
+        order.addItem(new Product(1L, "Escova", 1200.00, new Dimension(5.0, 1.0, 0.5), 1.0), 1);
+        order.calculateShippingFee();
+        assertThat(order.getShippingFee()).isEqualTo(Order.MINIMUM_SHIPPING_FEE);
     }
 }
